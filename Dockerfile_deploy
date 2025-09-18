@@ -60,6 +60,7 @@ ENV LD_LIBRARY_PATH=$LBDIR:$LD_LIBRARY_PATH
 
 RUN gst-launch-1.0 --version
 RUN gst-inspect-1.0 whepsrc
+RUN pip install opentelemetry-distro opentelemetry-exporter-otlp && opentelemetry-bootstrap -a install
 
 COPY assets assets
 COPY configs configs

@@ -19,6 +19,10 @@ from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.set_config import set_config, set_parallel_config
 from lightx2v.utils.utils import seed_all
 
+import opentelemetry
+import opentelemetry.trace
+tracer = opentelemetry.trace.get_tracer(__name__)
+
 
 class BaseWorker:
     @ProfilingContext4DebugL1("Init Worker Worker Cost:")
@@ -138,13 +142,16 @@ class RunnerThread(threading.Thread):
         self.args = args
         self.kwargs = kwargs
         self.rank = rank
+        self.parent_span = kwargs.pop("parent_span", None)
 
     def run(self):
         try:
-            # cuda device bind for each thread
-            torch.cuda.set_device(self.rank)
-            res = self.run_func(*self.args, **self.kwargs)
-            status = True
+            ctx = opentelemetry.trace.set_span_in_context(self.parent_span)
+            with tracer.start_as_current_span(f"worker_runner_thread", context=ctx):
+                # cuda device bind for each thread
+                torch.cuda.set_device(self.rank)
+                res = self.run_func(*self.args, **self.kwargs)
+                status = True
         except:  # noqa
             logger.error(f"RunnerThread run failed: {traceback.format_exc()}")
             res = None
@@ -203,7 +210,13 @@ class PipelineWorker(BaseWorker):
             self.runner.stop_signal = False
 
             future = asyncio.Future()
-            self.thread = RunnerThread(asyncio.get_running_loop(), future, self.run_func, self.rank)
+            self.thread = RunnerThread(
+                asyncio.get_running_loop(),
+                future,
+                self.run_func,
+                self.rank,
+                parent_span=opentelemetry.trace.get_current_span(),
+            )
             self.thread.start()
             status, _ = await future
             if not status:

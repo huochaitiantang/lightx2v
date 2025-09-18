@@ -1,3 +1,6 @@
+from opentelemetry.instrumentation.auto_instrumentation import initialize
+initialize()
+
 import argparse
 import asyncio
 import json

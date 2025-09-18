@@ -68,6 +68,7 @@ class RabbitMQQueueManager(BaseQueueManager):
                 async for message in qiter:
                     await message.ack()
                     subtask = json.loads(message.body.decode("utf-8"))
+                    subtask["headers"] = message.headers
                     subtasks.append(subtask)
                     if len(subtasks) >= max_batch:
                         return subtasks
@@ -76,6 +77,7 @@ class RabbitMQQueueManager(BaseQueueManager):
                         if message:
                             await message.ack()
                             subtask = json.loads(message.body.decode("utf-8"))
+                            subtask["headers"] = message.headers
                             subtasks.append(subtask)
                             if len(subtasks) >= max_batch:
                                 return subtasks

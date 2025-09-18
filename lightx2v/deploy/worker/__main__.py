@@ -1,3 +1,11 @@
+import opentelemetry
+from opentelemetry import trace
+import opentelemetry.propagate
+import opentelemetry.context
+tracer = trace.get_tracer(__name__)
+from opentelemetry.instrumentation.auto_instrumentation import initialize
+initialize()
+
 import argparse
 import asyncio
 import json
@@ -198,6 +206,15 @@ async def sync_subtask():
         logger.error(f"Sync subtask failed: {traceback.format_exc()}")
 
 
+async def otlp_run(aw, headers, worker_identity, worker_keys):
+    headers = headers or {}
+    ctx = opentelemetry.propagate.extract(headers)
+    with tracer.start_as_current_span(f"worker_run_{RANK}/{WORLD_SIZE}", context=ctx, attributes={
+        "worker_identity": worker_identity, "worker_keys": "-".join(worker_keys)
+    }):
+        return await aw
+
+
 async def main(args):
     if args.model_name == "":
         args.model_name = args.model_cls
@@ -234,7 +251,8 @@ async def main(args):
             status = TaskStatus.FAILED.name
             ping_task = None
             try:
-                run_task = asyncio.create_task(runner.run(sub["inputs"], sub["outputs"], sub["params"], data_manager))
+                t = runner.run(sub["inputs"], sub["outputs"], sub["params"], data_manager)
+                run_task = asyncio.create_task(otlp_run(t, sub.get("headers", {}), args.identity, worker_keys))
                 if RANK == TARGET_RANK:
                     ping_task = asyncio.create_task(ping_subtask(args.server, sub["worker_identity"], sub["task_id"], sub["worker_name"], sub["queue"], run_task, args.ping_interval))
                 ret = await run_task

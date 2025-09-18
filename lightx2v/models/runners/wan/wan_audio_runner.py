@@ -29,6 +29,9 @@ from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.utils import find_torch_model_path, load_weights, save_to_video, vae_to_comfyui_image
 
+import datetime
+import opentelemetry
+import opentelemetry.trace
 
 def get_optimal_patched_size_with_sp(patched_h, patched_w, sp_size):
     assert sp_size > 0 and (sp_size & (sp_size - 1)) == 0, "sp_size must be a power of 2"
@@ -593,6 +596,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
             segment_idx = 0
             fail_count = 0
             max_fail_count = 10
+            last_has_voice = False
 
             while True:
                 with ProfilingContext4DebugL1(f"stream segment get audio segment {segment_idx}"):
@@ -605,11 +609,29 @@ class WanAudioRunner(WanRunner):  # type:ignore
                             raise Exception(f"Failed to get audio chunk {fail_count} times, stop reader")
                         continue
 
+                cur_has_voice = abs(audio_array.min()) > 1e-6 or abs(audio_array.max()) > 1e-6
+                changed = (not last_has_voice) and cur_has_voice
+                last_has_voice = cur_has_voice
+                if changed:
+                    logger.warning(f"Start to read no zero audios")
+                    opentelemetry.trace.get_current_span().add_event("Start to read no zero audios", {
+                        "audio_min": str(audio_array.min()),
+                        "audio_max": str(audio_array.max()),
+                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    })
+
                 with ProfilingContext4DebugL1(f"stream segment end2end {segment_idx}"):
                     fail_count = 0
                     self.init_run_segment(segment_idx, audio_array)
                     latents = self.run_segment(total_steps=None)
                     self.gen_video = self.run_vae_decoder(latents)
+                    if changed:
+                        logger.warning(f"Start to publish videos with voices")
+                        opentelemetry.trace.get_current_span().add_event("Start to publish videos with voices", {
+                            "audio_min": str(audio_array.min()),
+                            "audio_max": str(audio_array.max()),
+                            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        })
                     self.end_run_segment()
                     segment_idx += 1
 
