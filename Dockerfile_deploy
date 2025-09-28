@@ -1,12 +1,20 @@
-FROM lightx2v/lightx2v:25091903-cu128 AS base
+FROM registry.cn-sh-01.sensecore.cn/devsft-ccr-2/lightx2v:25092201-cu128 AS base
+
+ARG PROXY1=""
+ARG PROXY2=""
 
 RUN mkdir /workspace/LightX2V
 WORKDIR /workspace/LightX2V
 ENV PYTHONPATH=/workspace/LightX2V
 
-RUN pip install opentelemetry-distro opentelemetry-exporter-otlp && opentelemetry-bootstrap -a install
-
 COPY assets assets
 COPY configs configs
 COPY lightx2v lightx2v
 COPY lightx2v_kernel lightx2v_kernel
+COPY requirements.txt requirements.txt
+
+RUN export https_proxy=$PROXY1 \
+    && export http_proxy=$PROXY1 \
+    && pip install -r requirements.txt \
+    && pip install opentelemetry-distro opentelemetry-exporter-otlp \
+    && opentelemetry-bootstrap -a install
