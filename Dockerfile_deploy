@@ -4,6 +4,8 @@ RUN mkdir /workspace/LightX2V
 WORKDIR /workspace/LightX2V
 ENV PYTHONPATH=/workspace/LightX2V
 
+RUN pip install opentelemetry-distro opentelemetry-exporter-otlp && opentelemetry-bootstrap -a install
+
 COPY assets assets
 COPY configs configs
 COPY lightx2v lightx2v
