@@ -518,6 +518,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
 
         tgt_h, tgt_w = self.input_info.target_shape[0], self.input_info.target_shape[1]
         prev_frames = torch.zeros((1, 3, self.config["target_video_length"], tgt_h, tgt_w), device=device)
+        last_frames = None
 
         if prev_video is not None:
             # Extract and process last frames
@@ -533,6 +534,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
             self.vae_encoder = self.load_vae_encoder()
 
         _, nframe, height, width = self.model.scheduler.latents.shape
+        prev_latents = torch.zeros((16, nframe, height, width), device=device, dtype=dtype)
         with ProfilingContext4DebugL1("vae_encoder in init run segment"):
             if self.config["model_cls"] == "wan2.2_audio":
                 if prev_video is not None:
@@ -541,7 +543,9 @@ class WanAudioRunner(WanRunner):  # type:ignore
                     prev_latents = None
                 prev_mask = self.model.scheduler.mask
             else:
-                prev_latents = self.vae_encoder.encode(prev_frames.to(dtype))
+                if last_frames is not None:
+                    prev_latent = self.vae_encoder.encode(last_frames.to(dtype))
+                    prev_latents[:, :prev_len] = prev_latent
 
             frames_n = (nframe - 1) * 4 + 1
             prev_mask = torch.ones((1, frames_n, height, width), device=device, dtype=dtype)
