@@ -247,8 +247,8 @@ if __name__ == "__main__":
         RANK,
         WORLD_SIZE,
         # "rtmp://localhost/live/test_audio",
-        "https://reverse.st-oc-01.chielo.org/10.5.64.49:8000/rtc/v1/whep/?app=live&stream=ll_test_audio&eip=10.120.114.76:8000",
-        segment_duration=1.0,
+        "https://reverse.st-oc-01.chielo.org/10.5.64.49:8000/rtc/v1/whep/?app=live&stream=ll_test_audio&eip=10.120.114.82:8000",
+        segment_duration=1.5,
         sample_rate=16000,
         audio_channels=1,
         prev_duration=1 / 16,
@@ -256,12 +256,14 @@ if __name__ == "__main__":
     reader.start()
     fail_count = 0
     max_fail_count = 2
+    interval = 1.5
 
     try:
         while True:
+            t0 = time.time()
             audio_data = reader.get_audio_segment(timeout=2)
             if audio_data is not None:
-                # logger.info(f"Got audio chunk, shape: {audio_data.shape}, range: [{audio_data.min()}, {audio_data.max()}]")
+                logger.info(f"Got audio chunk, shape: {audio_data.shape}, range: [{audio_data.min()}, {audio_data.max()}]")
                 fail_count = 0
             else:
                 fail_count += 1
@@ -269,6 +271,6 @@ if __name__ == "__main__":
                     logger.warning("Failed to get audio chunk, stop reader")
                     reader.stop()
                     break
-            time.sleep(0.95)
+            time.sleep(max(0, interval - (time.time() - t0)))
     finally:
         reader.stop()

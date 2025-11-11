@@ -128,7 +128,7 @@ class VARecorder:
                         except (BrokenPipeError, OSError, ConnectionResetError) as e:
                             logger.info(f"Video connection closed, stopping worker: {type(e).__name__}")
                             return
-                        if self.realtime:
+                        if self.realtime and i < data.shape[0] - 1:
                             time.sleep(max(0, packet_secs - (time.time() - t0)))
 
                     fail_time = 0
@@ -337,7 +337,9 @@ class VARecorder:
     def start(self, width: int, height: int):
         self.set_video_size(width, height)
         duration = 1.0
-        self.pub_livestream(torch.zeros((int(self.fps * duration), height, width, 3), dtype=torch.float16), torch.zeros(int(self.sample_rate * duration), dtype=torch.float16))
+        frames = int(self.fps * duration)
+        samples = int(self.sample_rate * (frames / self.fps))
+        self.pub_livestream(torch.zeros((frames, height, width, 3), dtype=torch.float16), torch.zeros(samples, dtype=torch.float16))
         time.sleep(duration)
 
     def set_video_size(self, width: int, height: int):
@@ -529,29 +531,32 @@ def create_simple_video(frames=10, height=480, width=640):
 
 if __name__ == "__main__":
     sample_rate = 16000
-    fps = 16
+    fps = 14
     width = 640
     height = 480
 
     recorder = VARecorder(
         # livestream_url="rtmp://localhost/live/test",
         # livestream_url="https://reverse.st-oc-01.chielo.org/10.5.64.49:8000/rtc/v1/whip/?app=live&stream=ll_test_video&eip=127.0.0.1:8000",
-        livestream_url="/path/to/output_video.mp4",
+        livestream_url="https://reverse.st-oc-01.chielo.org/10.5.64.49:8000/rtc/v1/whip/?app=subscribe&stream=ll_output_video&eip=10.120.114.82:8000",
         fps=fps,
         sample_rate=sample_rate,
     )
-
+    recorder.start(width, height)
     audio_path = "/path/to/test_b_2min.wav"
+    audio_path = "/data/nvme0/liuliang1/lightx2v/test_deploy/media_test/test_b.wav"
     audio_array, ori_sr = ta.load(audio_path)
     audio_array = ta.functional.resample(audio_array.mean(0), orig_freq=ori_sr, new_freq=16000)
     audio_array = audio_array.reshape(-1)
     secs = audio_array.shape[0] // sample_rate
-    interval = 1
+    interval = 1.5
+    i = 0
 
-    for i in range(0, secs, interval):
+    while i < secs:
+        t0 = time.time()
         logger.info(f"{i} / {secs} s")
-        start = i * sample_rate
-        end = (i + interval) * sample_rate
+        start = int(i * sample_rate)
+        end = int((i + interval) * sample_rate)
         cur_audio_array = audio_array[start:end]
         logger.info(f"audio: {cur_audio_array.shape} {cur_audio_array.dtype} {cur_audio_array.min()} {cur_audio_array.max()}")
 
@@ -560,5 +565,6 @@ if __name__ == "__main__":
         logger.info(f"images: {images.shape} {images.dtype} {images.min()} {images.max()}")
 
         recorder.pub_livestream(images, cur_audio_array)
-        time.sleep(interval)
+        i += interval
+        time.sleep(max(0, interval - (time.time() - t0)))
     recorder.stop()

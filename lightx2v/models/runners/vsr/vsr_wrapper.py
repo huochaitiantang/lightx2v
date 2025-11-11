@@ -139,6 +139,8 @@ class VSRWrapper:
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
         LQ, th, tw, F = prepare_input_tensor(video, scale=scale, dtype=self.dtype, device=self.device)
+        from loguru import logger
+        # logger.warning(f"input video shape: {video.shape}, LQ shape: {LQ.shape}, th: {th}, tw: {tw}, F: {F}")
 
         video = self.pipe(
             prompt="",
@@ -159,4 +161,5 @@ class VSRWrapper:
         )
         video = (video + 1.0) / 2.0  # 将 [-1,1] 映射到 [0,1]
         video = video.permute(1, 2, 3, 0).clamp(0.0, 1.0)  # [C,T,H,W] -> [T,H,W,C]
+        # logger.warning(f"output video shape: {video.shape}")
         return video

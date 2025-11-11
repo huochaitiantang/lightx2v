@@ -665,7 +665,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
         video_seg = self.gen_video[:, :, :useful_length].cpu()
         audio_seg = self.segment.audio_array[:, : useful_length * self._audio_processor.audio_frame_rate]
         audio_seg = audio_seg.sum(dim=0)  # Multiple audio tracks, mixed into one track
-        video_seg = vae_to_comfyui_image_inplace(video_seg)
+        # video_seg = vae_to_comfyui_image_inplace(video_seg)
 
         # [Warning] Need check whether video segment interpolation works...
         if "video_frame_interpolation" in self.config and self.vfi_model is not None:
@@ -677,13 +677,18 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 target_fps=target_fps,
             )
 
-        if "video_super_resolution" in self.config and self.vsr_model is not None:
+        if self.va_recorder and "video_super_resolution" in self.config and self.vsr_model is not None:
             logger.info(f"Applying video super resolution with scale {self.config['video_super_resolution']['scale']}")
+            video_seg = vae_to_comfyui_image_inplace(self.gen_video.cpu())
             video_seg = self.vsr_model.super_resolve_frames(
                 video_seg,
                 seed=self.config["video_super_resolution"]["seed"],
                 scale=self.config["video_super_resolution"]["scale"],
             )
+            # valid_duration = self.get_valid_duration()
+            # video_fps = self.get_video_fps()
+            # valid_fps = int(valid_duration * video_fps)
+            # video_seg = video_seg[:valid_fps]
 
         if self.va_recorder:
             self.va_recorder.pub_livestream(video_seg, audio_seg)
@@ -705,6 +710,23 @@ class WanAudioRunner(WanRunner):  # type:ignore
             world_size = dist.get_world_size()
         return rank, world_size
 
+    def get_valid_duration(self):
+        target_fps = self.config.get("target_fps", 16)
+        max_num_frames = self.config.get("target_video_length", 81)
+        prev_frames = self.config.get("prev_frame_length", 5)
+        return (max_num_frames - prev_frames) / target_fps
+
+    def get_video_fps(self):
+        record_fps = self.config.get("target_fps", 16)
+        if "video_frame_interpolation" in self.config and self.vfi_model is not None:
+            record_fps = self.config["video_frame_interpolation"]["target_fps"]
+        if "video_super_resolution" in self.config and self.vsr_model is not None:
+            vsr_input_frame = self.config.get("target_video_length", 81) - self.config.get("prev_frame_length", 5)
+            vsr_output_frame = (vsr_input_frame + 3) // 8 * 8 - 3
+            record_fps = float(vsr_output_frame / vsr_input_frame * record_fps)
+            logger.warning(f"VSR input frame: {vsr_input_frame}, VSR output frame: {vsr_output_frame}, record fps change to: {record_fps}")
+        return record_fps
+
     def init_va_recorder(self):
         output_video_path = self.input_info.save_result_path
         self.va_recorder = None
@@ -713,10 +735,8 @@ class WanAudioRunner(WanRunner):  # type:ignore
         logger.info(f"init va_recorder with output_video_path: {output_video_path}")
         rank, world_size = self.get_rank_and_world_size()
         if output_video_path and rank == world_size - 1:
-            record_fps = self.config.get("target_fps", 16)
+            record_fps = self.get_video_fps()
             audio_sr = self.config.get("audio_sr", 16000)
-            if "video_frame_interpolation" in self.config and self.vfi_model is not None:
-                record_fps = self.config["video_frame_interpolation"]["target_fps"]
 
             whip_shared_path = os.getenv("WHIP_SHARED_LIB", None)
             if whip_shared_path and output_video_path.startswith("http"):
@@ -766,7 +786,16 @@ class WanAudioRunner(WanRunner):  # type:ignore
             rank, world_size = self.get_rank_and_world_size()
             if rank == world_size - 1:
                 assert self.va_recorder is not None, "va_recorder is required for stream audio input for rank 2"
-                self.va_recorder.start(self.input_info.target_shape[1], self.input_info.target_shape[0])
+                tW, tH = self.input_info.target_shape[1], self.input_info.target_shape[0]
+                if "video_super_resolution" in self.config and self.vsr_model is not None:
+                    from lightx2v.models.runners.vsr.vsr_wrapper import compute_scaled_and_target_dims
+                    _, _, tW, tH = compute_scaled_and_target_dims(
+                        self.input_info.target_shape[1],
+                        self.input_info.target_shape[0],
+                        scale=self.config["video_super_resolution"]["scale"],
+                        multiple=128,
+                    )
+                self.va_recorder.start(tW, tH)
             if world_size > 1:
                 dist.barrier()
 
@@ -798,6 +827,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
                     self.gen_video = self.run_vae_decoder(latents)
                     self.end_run_segment(segment_idx)
                     segment_idx += 1
+                    time.sleep(0.2)
 
         finally:
             if hasattr(self.model, "inputs"):
